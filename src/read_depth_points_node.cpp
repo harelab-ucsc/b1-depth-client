@@ -12,24 +12,39 @@
 
 #include "msg_helpers.h"
 
-#define DATA_SIZE 6144000
 #define HEIGHT 480
 #define WIDTH 640
+
+#define NUM_CAMS 5
+
+const std::string cameras[NUM_CAMS] = {
+    "nx1_camera_down",
+    "nx1_camera_forward",
+    "nx2_camera_left",
+    "nx2_camera_right",
+    "nx3_camera_backward"
+};
 
 int main (int argc, char *argv[])
 {
     ros::init(argc, argv, "read_depth_points_node");
+    ROS_INFO("Started read_depth_points node\n");
     
     ros::NodeHandle node;
-    ros::Rate loop_rate(100);
+    ros::Rate loop_rate(1000);
 
-    ros::Publisher pcl_pub = node.advertise<sensor_msgs::PointCloud2>("/nx1_camera_forward/depth/color/points", 1);
+    ros::Publisher pcl_pubs[NUM_CAMS];
+    for (uint8_t i = 0; i < NUM_CAMS; i++) {
+        ros::Publisher pcl_pub = node.advertise<sensor_msgs::PointCloud2>("/" + cameras[i] + "/depth/color/points", 1);
+        pcl_pubs[i] = pcl_pub;
+    }
 
     zmq::context_t ctx;
 
+    // TODO: update for multiple devices
     std::string ipAddress = "192.168.123.23:5556";
 
-    std::cout << "Start listening on " << ipAddress << "...\n" << std::endl;
+    ROS_INFO("Start listening for pointcloud data on %s...\n", ipAddress.c_str());
     zmq::socket_t subscriber (ctx, zmq::socket_type::sub);
     subscriber.connect("tcp://" + ipAddress);
 
@@ -37,13 +52,12 @@ int main (int argc, char *argv[])
 
     while (ros::ok()) {
         zmq::message_t messageInfo;
-        zmq::message_t messagePoints;
         subscriber.recv(messageInfo, zmq::recv_flags::none);
-        subscriber.recv(messagePoints, zmq::recv_flags::none);
 
         PointCloudInfo info = deserialize(messageInfo.data<uint8_t>(), messageInfo.size());
         
-        std::cout << "Got message with ts: " << info.timestamp << std::endl;
+        zmq::message_t messagePoints;
+        subscriber.recv(messagePoints, zmq::recv_flags::none);
 
         float* points = messagePoints.data<float>();
 
@@ -62,9 +76,9 @@ int main (int argc, char *argv[])
         pcl_msg.header = std_msgs::Header();
         pcl_msg.header.stamp = ros::Time::now();
         if (info.index == 0) {
-            pcl_msg.header.frame_id = "nx1_camera_forward_link";
+            pcl_msg.header.frame_id = cameras[0] + "_link";
         } else {
-            pcl_msg.header.frame_id = "nx1_camera_down_link";
+            pcl_msg.header.frame_id = cameras[1] + "_link";
         }
 
         pcl_msg.height = HEIGHT;
@@ -73,18 +87,21 @@ int main (int argc, char *argv[])
 
         //Total number of bytes per point
         pcl_msg.point_step = 12;
-        pcl_msg.row_step = pcl_msg.point_step * pcl_msg.width * pcl_msg.height;
-        pcl_msg.data.resize(pcl_msg.row_step);
+        pcl_msg.row_step = pcl_msg.point_step * pcl_msg.width;
+        pcl_msg.data.resize(pcl_msg.row_step * pcl_msg.height);
+        if (pcl_msg.row_step * pcl_msg.height != messagePoints.size()) {
+            ROS_ERROR("Message points size does not match expected! Expected: %d, got %ld", pcl_msg.row_step * pcl_msg.height, messagePoints.size());
+        }
 
         //Iterators for PointCloud msg
         sensor_msgs::PointCloud2Iterator<float> iterX(pcl_msg, "x");
         sensor_msgs::PointCloud2Iterator<float> iterY(pcl_msg, "y");
         sensor_msgs::PointCloud2Iterator<float> iterZ(pcl_msg, "z");
 
-        for (int i = 0; i < DATA_SIZE / 3; i++) {  
-            *iterZ = points[i*3];
-            *iterY = points[i*3+1];
-            *iterX = points[i*3+2];
+        for (int i = 0; i <= (messagePoints.size() / sizeof(float)) - 3; i += 3) {  
+            *iterZ = points[i];
+            *iterY = points[i+1];
+            *iterX = points[i+2];
 
             // Increment the iterators
             ++iterX;
@@ -92,7 +109,7 @@ int main (int argc, char *argv[])
             ++iterZ;
         }
 
-        pcl_pub.publish(pcl_msg);
+        pcl_pubs[info.index].publish(pcl_msg);
 
         ros::spinOnce();
         loop_rate.sleep();
