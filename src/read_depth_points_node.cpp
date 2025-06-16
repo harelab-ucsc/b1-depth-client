@@ -74,7 +74,7 @@ int main (int argc, char *argv[])
 
         //Msg header
         pcl_msg.header = std_msgs::Header();
-        pcl_msg.header.stamp = ros::Time::now();
+        pcl_msg.header.stamp = ros::Time(info.timestamp / 1000.0);
         if (info.index == 0) {
             pcl_msg.header.frame_id = cameras[0] + "_link";
         } else {
