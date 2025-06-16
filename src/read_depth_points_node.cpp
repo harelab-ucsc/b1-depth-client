@@ -41,12 +41,13 @@ int main (int argc, char *argv[])
 
     zmq::context_t ctx;
 
-    // TODO: update for multiple devices
-    std::string ipAddress = "192.168.123.23:5556";
 
-    ROS_INFO("Start listening for pointcloud data on %s...\n", ipAddress.c_str());
+    ROS_INFO("Start listening for pointcloud data...\n");
     zmq::socket_t subscriber (ctx, zmq::socket_type::sub);
-    subscriber.connect("tcp://" + ipAddress);
+    // each of the NX ports
+    subscriber.connect("tcp://192.168.123.23:5556");
+    subscriber.connect("tcp://192.168.123.24:5556");
+    subscriber.connect("tcp://192.168.123.25:5556");
 
     subscriber.set(zmq::sockopt::subscribe, "");
 
@@ -75,11 +76,7 @@ int main (int argc, char *argv[])
         //Msg header
         pcl_msg.header = std_msgs::Header();
         pcl_msg.header.stamp = ros::Time(info.timestamp / 1000.0);
-        if (info.index == 0) {
-            pcl_msg.header.frame_id = cameras[0] + "_link";
-        } else {
-            pcl_msg.header.frame_id = cameras[1] + "_link";
-        }
+        pcl_msg.header.frame_id = cameras[info.index] + "_link";
 
         pcl_msg.height = HEIGHT;
         pcl_msg.width = WIDTH;
